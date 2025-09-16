@@ -14,6 +14,22 @@ import androidx.core.content.ContextCompat
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
+/**
+ * CamActivity
+ * ----------------------
+ * This activity handles two main functions:
+ * 1. Real-time camera preview (using CameraX API)
+ * 2. Uploading images from the gallery (using Activity Result API)
+ *
+ * - CameraX is used for live preview and scanning fish freshness via camera.
+ * - Gallery picker lets the user upload an image for analysis.
+ *
+ * NOTE:
+ * - `startActivityForResult()` is deprecated, so this uses
+ *   `registerForActivityResult()` for cleaner and modern handling of results.
+ * - Extend this activity to include ML/AI-based analysis on the captured
+ *   or uploaded image.
+ */
 class CamActivity : AppCompatActivity() {
 
     private lateinit var previewView: PreviewView
@@ -21,7 +37,7 @@ class CamActivity : AppCompatActivity() {
     private lateinit var btnUpload: Button
     private lateinit var btnScan: Button
 
-    // ✅ Modern way to handle image picker
+    // Activity Result Launcher for image picker
     private val pickImageLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
@@ -29,7 +45,7 @@ class CamActivity : AppCompatActivity() {
                 val selectedImageUri: Uri? = data?.data
                 if (selectedImageUri != null) {
                     Toast.makeText(this, "Image selected: $selectedImageUri", Toast.LENGTH_SHORT).show()
-                    // TODO: dito ilagay ang scanning/analysis logic for uploaded image
+                    // TODO: Call your ML model / analysis function here
                 }
             }
         }
@@ -47,15 +63,15 @@ class CamActivity : AppCompatActivity() {
         // Start camera preview
         startCamera()
 
-        // Upload image button
+        // Upload button → Open gallery
         btnUpload.setOnClickListener {
             openGallery()
         }
 
-        // Scan button (camera)
+        // Scan button → Camera analysis
         btnScan.setOnClickListener {
             Toast.makeText(this, "Scanning with camera...", Toast.LENGTH_SHORT).show()
-            // TODO: Add scanning logic for camera
+            // TODO: Add scanning logic for camera input
         }
     }
 
@@ -83,7 +99,7 @@ class CamActivity : AppCompatActivity() {
         val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
             type = "image/*"
         }
-        pickImageLauncher.launch(intent) // ✅ no more deprecated method
+        pickImageLauncher.launch(intent) // Modern way (no deprecation)
     }
 
     override fun onDestroy() {

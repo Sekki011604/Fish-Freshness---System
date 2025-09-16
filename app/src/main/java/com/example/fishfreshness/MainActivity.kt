@@ -26,8 +26,15 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this@MainActivity)
                 .setTitle("About This App")
                 .setMessage(
-                    "This app analyzes the freshness of Mackerel Scad fish in real-time.\n\n" +
-                            "Developed for research and educational purposes."
+                    "🐟 This application helps analyze the freshness of Mackerel Scad (\"Galunggong\") " +
+                            "using real-time camera scanning or uploaded images.\n\n" +
+                            "🔬 Purpose:\n" +
+                            "• Assist consumers in identifying fish quality\n\n" +
+                            "📱 Features:\n" +
+                            "• Camera scanning with live preview\n" +
+                            "• Upload and analyze stored images\n" +
+                            "• Simple, research-focused design\n\n" +
+                            "Developed as part of an academic project in Computer Science."
                 )
                 .setPositiveButton("OK", null)
                 .show()
