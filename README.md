@@ -1,45 +1,59 @@
-🐟 Fish Freshness App
+# 🐟 Fish Freshness App  
 
-An Android application that analyzes the freshness of Mackerel Scad (Galunggong) fish using real-time camera scanning or uploaded images.
-Developed as part of a Computer Science research project.
+<p align="center">
+  <img src="https://img.shields.io/badge/Android-Kotlin-green?logo=kotlin" alt="Kotlin"/>
+  <img src="https://img.shields.io/badge/SDK-21%2B-blue" alt="SDK"/>
+  <img src="https://img.shields.io/badge/License-MIT-orange" alt="License"/>
+  <img src="https://img.shields.io/badge/Status-Research%20Project-yellow" alt="Status"/>
+</p>
 
-📌 Features
+---
 
-📷 Real-time Camera Scanning – Detects fish freshness instantly using live camera preview.
+## 📌 Overview  
 
-🖼 Image Upload – Analyze fish freshness from stored images.
+**Fish Freshness App** is an Android application developed to analyze the freshness of **Mackerel Scad (Galunggong)**.  
+The app allows users to **scan fish using the camera** or **upload an image** for analysis.  
+It was created as part of a **Computer Science research project** focused on **food safety and shelf-life prediction**.  
 
-ℹ️ About Section – Provides details about the app’s purpose and features.
+---
 
-🎨 Simple & Clean UI – Designed for usability and research use.
+## ✨ Features  
 
-🛠 Tech Stack
+✅ **Real-time Camera Scanning** – Capture images directly via the device camera  
+✅ **Upload from Gallery** – Analyze fish freshness from stored images  
+✅ **About Section** – Research details and app purpose  
+✅ **Modern UI** – Black theme with clean Material Design  
+✅ **Lightweight & Fast** – Optimized for research use  
 
-Language: Kotlin
+---
 
-Framework: Android SDK
+## 🛠️ Tech Stack  
 
-UI: XML Layouts, Material Design
+- **Language:** Kotlin  
+- **UI Design:** XML, Material Design Components  
+- **Camera:** AndroidX CameraX  
+- **IDE:** Android Studio  
 
-Camera: AndroidX CameraX API
+---
 
-Dialog: AlertDialog for About/Info
+## 📂 Project Structure  
 
+```plaintext
 Fish-Freshness-App/
-│── app/src/main/java/com/example/fishfreshness/
-│   │── MainActivity.kt       # Main screen with About + Start Scan
-│   │── CamActivity.kt        # Camera activity for scanning
+│── app/
+│   └── src/
+│       └── main/
+│           ├── java/com/example/fishfreshness/
+│           │   ├── MainActivity.kt      # Home screen with About & Start Scan
+│           │   ├── CamActivity.kt       # Camera + image upload
+│           │
+│           ├── res/
+│           │   ├── layout/
+│           │   │   ├── activity_main.xml
+│           │   │   ├── activity_cam.xml
+│           │   ├── drawable/            # App icons, buttons, banners
+│           │   ├── values/              # Strings, colors, styles
+│           │
+│           ├── AndroidManifest.xml
 │
-│── app/src/main/res/layout/
-│   │── activity_main.xml     # Main UI
-│   │── activity_cam.xml      # Camera preview UI
-│
-│── app/src/main/res/drawable/
-│   │── ic_info.png           # About icon
-│   │── sample_fish.png       # Sample fish images
-│
-│── README.md                 # Project documentation
-
-
-git clone https://github.com/yourusername/Fish-Freshness-App.git
-cd Fish-Freshness-App
+│── README.md
