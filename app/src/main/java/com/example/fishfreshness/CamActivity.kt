@@ -1,109 +1,308 @@
 package com.example.fishfreshness
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.graphics.*
 import android.net.Uri
 import android.os.Bundle
+import android.provider.MediaStore
+import android.util.Log
 import android.widget.Button
-import android.widget.Toast
+import android.widget.ImageView
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import org.tensorflow.lite.Interpreter
+import java.io.ByteArrayOutputStream
+import java.io.FileInputStream
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.max
+import kotlin.math.min
 
-/**
- * CamActivity
- * ----------------------
- * This activity handles two main functions:
- * 1. Real-time camera preview (using CameraX API)
- * 2. Uploading images from the gallery (using Activity Result API)
- *
- * - CameraX is used for live preview and scanning fish freshness via camera.
- * - Gallery picker lets the user upload an image for analysis.
- *
- * NOTE:
- * - `startActivityForResult()` is deprecated, so this uses
- *   `registerForActivityResult()` for cleaner and modern handling of results.
- * - Extend this activity to include ML/AI-based analysis on the captured
- *   or uploaded image.
- */
 class CamActivity : AppCompatActivity() {
 
     private lateinit var previewView: PreviewView
-    private lateinit var cameraExecutor: ExecutorService
+    private lateinit var imgUploaded: ImageView
+    private lateinit var overlayView: OverlayView
+    private lateinit var tvPrediction: TextView
     private lateinit var btnUpload: Button
     private lateinit var btnScan: Button
 
-    // Activity Result Launcher for image picker
-    private val pickImageLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                val data: Intent? = result.data
-                val selectedImageUri: Uri? = data?.data
-                if (selectedImageUri != null) {
-                    Toast.makeText(this, "Image selected: $selectedImageUri", Toast.LENGTH_SHORT).show()
-                    // TODO: Call your ML model / analysis function here
+    private val TAG = "CamActivity"
+    private val IMAGE_SIZE = 640
+    private val LABELS_FILE = "labels.txt"
+
+    private var interpreterBest: Interpreter? = null
+    private var interpreterLast: Interpreter? = null
+    private var labels: List<String> = emptyList()
+
+    private val reqExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val requestedParts = listOf("eye", "caudal_fin", "pectoral_fin", "skin_texture")
+
+    // ------------------ IMAGE PICKER ------------------
+    private val pickImageLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        if (res.resultCode == Activity.RESULT_OK && res.data != null) {
+            val uri: Uri? = res.data!!.data
+            uri?.let {
+                try {
+                    val bitmap = MediaStore.Images.Media.getBitmap(contentResolver, uri)
+                    imgUploaded.setImageBitmap(bitmap)
+                    imgUploaded.visibility = ImageView.VISIBLE
+                    previewView.visibility = PreviewView.GONE
+                    imgUploaded.post {
+                        val dispRect = computeImageViewDisplayRect(imgUploaded, bitmap)
+                        reqExecutor.execute {
+                            val (boxes, labelsOut) = detectWithBothModels(bitmap)
+                            runOnUiThread {
+                                overlayView.setResults(boxes, labelsOut, bitmap.width, bitmap.height, dispRect)
+                                tvPrediction.text = if (labelsOut.isNotEmpty()) labelsOut.joinToString(", ") else "No detection"
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "load image failed", e)
                 }
             }
         }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.cam_activity)
 
         previewView = findViewById(R.id.previewView)
+        imgUploaded = findViewById(R.id.imgUploaded)
+        overlayView = findViewById(R.id.overlayView)
+        tvPrediction = findViewById(R.id.tvPrediction)
         btnUpload = findViewById(R.id.btnUpload)
         btnScan = findViewById(R.id.btnScan)
 
-        cameraExecutor = Executors.newSingleThreadExecutor()
-
-        // Start camera preview
-        startCamera()
-
-        // Upload button → Open gallery
         btnUpload.setOnClickListener {
-            openGallery()
+            val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+            pickImageLauncher.launch(intent)
         }
 
-        // Scan button → Camera analysis
         btnScan.setOnClickListener {
-            Toast.makeText(this, "Scanning with camera...", Toast.LENGTH_SHORT).show()
-            // TODO: Add scanning logic for camera input
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 123)
+            } else {
+                imgUploaded.visibility = ImageView.GONE
+                previewView.visibility = PreviewView.VISIBLE
+                startCamera()
+            }
+        }
+
+        // Load labels
+        try {
+            labels = loadLabels(LABELS_FILE)
+        } catch (e: Exception) {
+            labels = emptyList()
+            Log.w(TAG, "labels load failed: ${e.message}")
+        }
+
+        // Load models
+        try {
+            interpreterBest = Interpreter(loadModelFile("best_float32.tflite"))
+            interpreterLast = Interpreter(loadModelFile("last_float32.tflite"))
+            tvPrediction.text = "Models loaded"
+        } catch (e: Exception) {
+            interpreterBest = null
+            interpreterLast = null
+            tvPrediction.text = "Model load failed"
+            Log.e(TAG, "Model load error", e)
         }
     }
 
+    // ------------------ UTILS ------------------
+    private fun computeImageViewDisplayRect(iv: ImageView, bmp: Bitmap): RectF {
+        val vw = iv.width.toFloat()
+        val vh = iv.height.toFloat()
+        val iw = bmp.width.toFloat()
+        val ih = bmp.height.toFloat()
+        if (vw == 0f || vh == 0f) return RectF(0f, 0f, vw, vh)
+        val scale = min(vw / iw, vh / ih)
+        val dispW = iw * scale
+        val dispH = ih * scale
+        val left = (vw - dispW) / 2f
+        val top = (vh - dispH) / 2f
+        return RectF(left, top, left + dispW, top + dispH)
+    }
+
+    private data class LetterboxResult(val bitmap: Bitmap, val scale: Float, val dx: Int, val dy: Int)
+    private fun letterboxImage(src: Bitmap, targetSize: Int): LetterboxResult {
+        val scale = min(targetSize.toFloat() / src.width, targetSize.toFloat() / src.height)
+        val newW = (src.width * scale).toInt()
+        val newH = (src.height * scale).toInt()
+        val resized = Bitmap.createScaledBitmap(src, newW, newH, true)
+        val output = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val p = Paint()
+        p.color = Color.BLACK
+        canvas.drawRect(0f, 0f, targetSize.toFloat(), targetSize.toFloat(), p)
+        val dx = (targetSize - newW) / 2
+        val dy = (targetSize - newH) / 2
+        canvas.drawBitmap(resized, dx.toFloat(), dy.toFloat(), null)
+        return LetterboxResult(output, scale, dx, dy)
+    }
+
+    private data class RawDet(val box: RectF, val cls: Int, val score: Float)
+
+    // ------------------ DETECTION ------------------
+    private fun detectWithBothModels(bitmap: Bitmap): Pair<List<RectF>, List<String>> {
+        val detBest = detectWithInterpreter(bitmap, interpreterBest)
+        val detLast = detectWithInterpreter(bitmap, interpreterLast)
+        return ensembleDetections(detBest.first, detLast.first)
+    }
+
+    private fun detectWithInterpreter(bitmap: Bitmap, interp: Interpreter?): Pair<List<RawDet>, List<String>> {
+        if (interp == null) return Pair(emptyList(), emptyList())
+
+        val lb = letterboxImage(bitmap, IMAGE_SIZE)
+        val inpBmp = lb.bitmap
+
+        val input = Array(1) { Array(IMAGE_SIZE) { Array(IMAGE_SIZE) { FloatArray(3) } } }
+        for (y in 0 until IMAGE_SIZE) {
+            for (x in 0 until IMAGE_SIZE) {
+                val px = inpBmp.getPixel(x, y)
+                input[0][y][x][0] = (px shr 16 and 0xFF) / 255f
+                input[0][y][x][1] = (px shr 8 and 0xFF) / 255f
+                input[0][y][x][2] = (px and 0xFF) / 255f
+            }
+        }
+
+        val output = Array(1) { Array(20) { FloatArray(8400) } }
+        interp.run(input, output)
+
+        val numClasses = 20 - 4
+        val rawDetections = ArrayList<RawDet>(200)
+
+        for (i in 0 until 8400) {
+            val cx = output[0][0][i] * IMAGE_SIZE
+            val cy = output[0][1][i] * IMAGE_SIZE
+            val w = output[0][2][i] * IMAGE_SIZE
+            val h = output[0][3][i] * IMAGE_SIZE
+
+            val scores = FloatArray(numClasses) { c -> output[0][4 + c][i] }
+            val maxIdx = scores.indices.maxByOrNull { scores[it] } ?: -1
+            val score = if (maxIdx >= 0) scores[maxIdx] else 0f
+
+            if (score > 0.2f && maxIdx >= 0) {
+                val left = (cx - w / 2f - lb.dx) / lb.scale
+                val top = (cy - h / 2f - lb.dy) / lb.scale
+                val right = (cx + w / 2f - lb.dx) / lb.scale
+                val bottom = (cy + h / 2f - lb.dy) / lb.scale
+                val r = RectF(max(0f, left), max(0f, top), min(bitmap.width.toFloat(), right), min(bitmap.height.toFloat(), bottom))
+                if (r.width() > 5 && r.height() > 5) rawDetections.add(RawDet(r, maxIdx, score))
+            }
+        }
+        return Pair(rawDetections, emptyList())
+    }
+
+    private fun ensembleDetections(det1: List<RawDet>, det2: List<RawDet>): Pair<List<RectF>, List<String>> {
+        val combinedBoxes = mutableListOf<RectF>()
+        val combinedLabels = mutableListOf<String>()
+
+        for (part in requestedParts) {
+            val indicesForPart = labels.mapIndexedNotNull { idx, lbl -> if (lbl.endsWith("_$part")) idx else null }
+            val candidates = det1.filter { it.cls in indicesForPart } + det2.filter { it.cls in indicesForPart }
+            val best = candidates.maxByOrNull { it.score }
+            if (best != null) {
+                combinedBoxes.add(best.box)
+                val labelName = if (best.cls < labels.size) labels[best.cls] else "Class ${best.cls}"
+                combinedLabels.add("$labelName ${(best.score * 100).toInt()}%")
+            }
+        }
+        return Pair(combinedBoxes, combinedLabels)
+    }
+
+    // ------------------ CAMERAX ------------------
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-
         cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
+            val provider = cameraProviderFuture.get()
+            val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
-            val preview = androidx.camera.core.Preview.Builder().build()
-            preview.setSurfaceProvider(previewView.surfaceProvider)
-
-            val cameraSelector = androidx.camera.core.CameraSelector.DEFAULT_BACK_CAMERA
+            val analyzer = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .also {
+                    it.setAnalyzer(reqExecutor) { imageProxy ->
+                        val bmp = imageProxyToBitmap(imageProxy)
+                        if (bmp != null) {
+                            val (boxes, labelsOut) = detectWithBothModels(bmp)
+                            if (boxes.isNotEmpty()) { // only update overlay if detection exists
+                                runOnUiThread {
+                                    overlayView.setResults(boxes, labelsOut, bmp.width, bmp.height, null)
+                                    tvPrediction.text = labelsOut.joinToString(", ")
+                                }
+                            }
+                        }
+                        imageProxy.close()
+                    }
+                }
 
             try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(this, cameraSelector, preview)
-            } catch (exc: Exception) {
-                exc.printStackTrace()
+                provider.unbindAll()
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analyzer)
+            } catch (e: Exception) {
+                Log.e(TAG, "bind camera failed", e)
             }
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun openGallery() {
-        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-            type = "image/*"
+    private fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
+        return try {
+            val yBuffer = image.planes[0].buffer
+            val uBuffer = image.planes[1].buffer
+            val vBuffer = image.planes[2].buffer
+
+            val ySize = yBuffer.remaining()
+            val uSize = uBuffer.remaining()
+            val vSize = vBuffer.remaining()
+
+            val nv21 = ByteArray(ySize + uSize + vSize)
+            yBuffer.get(nv21, 0, ySize)
+            vBuffer.get(nv21, ySize, vSize)
+            uBuffer.get(nv21, ySize + vSize, uSize)
+
+            val yuv = android.graphics.YuvImage(nv21, android.graphics.ImageFormat.NV21, image.width, image.height, null)
+            val baos = ByteArrayOutputStream()
+            yuv.compressToJpeg(Rect(0, 0, image.width, image.height), 90, baos)
+            val bytes = baos.toByteArray()
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (e: Exception) {
+            Log.e(TAG, "imageProxyToBitmap error", e)
+            null
         }
-        pickImageLauncher.launch(intent) // Modern way (no deprecation)
+    }
+
+    // ------------------ ASSET LOADERS ------------------
+    private fun loadModelFile(name: String): MappedByteBuffer {
+        val fd = assets.openFd(name)
+        val fis = FileInputStream(fd.fileDescriptor)
+        return fis.channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
+    }
+
+    private fun loadLabels(filename: String): List<String> {
+        val out = mutableListOf<String>()
+        assets.open(filename).bufferedReader().useLines { lines -> lines.forEach { out.add(it.trim()) } }
+        return out
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        cameraExecutor.shutdown()
+        reqExecutor.shutdown()
+        interpreterBest?.close()
+        interpreterLast?.close()
     }
 }
+

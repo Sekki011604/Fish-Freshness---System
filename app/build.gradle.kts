@@ -73,4 +73,23 @@ dependencies {
     implementation("androidx.camera:camera-view:1.3.0")
     implementation("androidx.camera:camera-extensions:1.3.0")
 
+    // TensorFlow Lite runtime
+    implementation("org.tensorflow:tensorflow-lite:2.13.0")
+    // TFLite Support Library (optional but recommended)
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.3")
+    // TFLite Task Library for classification (optional)
+    implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.3")
+
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.android.material:material:1.10.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.0")
+    implementation("androidx.camera:camera-core:1.3.0")
+    implementation("androidx.camera:camera-camera2:1.3.0")
+    implementation("androidx.camera:camera-lifecycle:1.3.0")
+    implementation("androidx.camera:camera-view:1.3.0")
+
+    implementation("androidx.core:core-ktx:1.12.0")
+
+
 }
